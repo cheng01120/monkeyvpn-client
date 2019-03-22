@@ -25,10 +25,10 @@ endif()
 include_directories(${Boost_INCLUDE_DIRS})
 link_directories(${Boost_LIBRARY_DIRS})
 
-include_directories("../headers")
+# include_directories("../headers")
 # build 'libmonkeyvpn' first
-link_directories("../libmonkeyvpn")
+include_directories("../3rdparty")
 
 set(HEADERS tap_device.hpp vl_packet.hpp)
-add_executable(MonkeyVPN WIN32  "monkeyvpn.rc" "main.cpp" "tap_device.cpp")
-target_link_libraries(MonkeyVPN  ${wxWidgets_LIBRARIES} ${Boost_LIBRARIES} monkeyvpn)
+add_executable(MonkeyVPN WIN32  "monkeyvpn.rc" "main.cpp" "tap_device.cpp" "../3rdparty/uECC.c" "../3rdparty/lzf_c.c" "../3rdparty/lzf_d.c")
+target_link_libraries(MonkeyVPN  ${wxWidgets_LIBRARIES} ${Boost_LIBRARIES})

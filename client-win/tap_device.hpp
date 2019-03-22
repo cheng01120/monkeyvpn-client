@@ -1,6 +1,9 @@
 #ifndef _tap_device_
 #define _tap_device_
 
+#include "uECC.h"
+#include "lzf.h"
+
 #include <wx/wx.h>
 #include <wx/msw/registry.h>
 #include <wx/string.h>
@@ -24,5 +27,6 @@ void GetDeviceGuid(wxString&);
 HANDLE OpenDevice();
 void GetMacAddress(HANDLE, unsigned char *);
 void EnableDevice(HANDLE h);
+
 
 #endif

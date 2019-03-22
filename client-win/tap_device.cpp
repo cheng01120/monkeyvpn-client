@@ -44,6 +44,7 @@ void GetMacAddress(HANDLE h, unsigned char *mac) {
 	DWORD len;
 	DeviceIoControl(h, TAP_IOCTL_GET_MAC, mac, 6, mac, 6, &len, NULL);
 }
+
 void EnableDevice(HANDLE h) {
 	DWORD len;
 	int enable = 1;

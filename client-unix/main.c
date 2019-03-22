@@ -233,7 +233,12 @@ int build_fd_sets()
 int handle_read_from_tuntap()
 {
   int read_count = 0, write_count = 0;
-  read_count = read(tuntap.fd, tuntap.recv_buf, LZF_BUF_SIZE);
+
+  // make sure receive buffer has enough space.
+  int bytes_to_read = MAX_QUEUE_SIZE - bytes_in_peer_buf - 2;
+  if(bytes_to_read <= 0) return 0;
+
+  read_count = read(tuntap.fd, tuntap.recv_buf, bytes_to_read);
   if (read_count < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
     perror("Read from tuntap");
     return -1;
@@ -251,10 +256,12 @@ int handle_read_from_tuntap()
 		memcpy(tuntap.recv_buf, &len, 2);
 
 		// Copy to peer send buf.
+		/*
 		if(bytes_in_peer_buf + 2 + compressed_len > MAX_QUEUE_SIZE) {
 			log_message("Peer write buffer overflow");
 			return -1;
 		}
+		*/
 
 		memcpy(peer_write_buf + bytes_in_peer_buf, tuntap.recv_buf, 2 + compressed_len);
 		bytes_in_peer_buf += 2 + compressed_len;

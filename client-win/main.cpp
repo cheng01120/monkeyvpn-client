@@ -19,10 +19,11 @@
 #include <regex>
 
 /* third party libraries */
-#include <monkeyvpn/monkeyvpn.h>
 
 #include "vl_packet.hpp"
 #include "tap_device.hpp"
+
+#define XOR_KEYLEN 32
 
 
 // The network thread communicates with the GUI by posting a wxTheadEvent with id = ID_THREAD to it.
@@ -403,11 +404,13 @@ void VLSession::StartReadFromNetwork() {
 					TRACE(LOG_TRACE, "Read %d bytes of body data", bytes_read);
 					ShowBytesXferred(ID_THREAD_DOWNLOAD, bytes_read + vl_packet::header_length);
 
+					/*
 					if( bytes_read % XOR_KEYLEN ) {
 						TRACE(LOG_ERROR, "Invalid block size: %d", bytes_read);
 						Close();
 						return;
 					}
+					*/
 
 					unsigned packet_len  = bytes_read;
 
@@ -789,7 +792,7 @@ void VLFrame::OnThreadEvent(wxThreadEvent& event)
 		case ID_THREAD_ERROR:
 			//if(m_taskBarIcon) RemoveTaskBarIcon();
 			//if(!IsShown()) Show(true);
-			//wxMessageBox(event.GetString(), "Error", wxICON_ERROR);
+			wxMessageBox(event.GetString(), "Error", wxICON_ERROR);
 			//tip = new wxRichToolTip("Error", event.GetString());
 			//tip->SetIcon(wxICON_ERROR);
 			//tip->ShowFor(m_taskBarIcon);
