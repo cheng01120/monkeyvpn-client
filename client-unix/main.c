@@ -57,8 +57,8 @@ const char *username = "openwrt";
 const char *password = "openwrt";
 unsigned char MAC[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
-void read_packet_header(void);
-void read_packet_body(void);
+void parse_packet_header(void);
+void parse_packet_body(void);
 
 void shutdown_properly(int code);
 
@@ -100,7 +100,7 @@ int connect_server()
   int i;
   struct hostent *he;
   struct in_addr **addr_list;
-  if( (he = gethostbyname("ovh")) == NULL) {
+  if( (he = gethostbyname("yorkie")) == NULL) {
 	  perror("gethostbyname");
 	  return -1;
   }
@@ -204,7 +204,7 @@ int auth() {
 
 	server.bytes_to_read = 2; // header length: 2 bytes
 	server.bytes_read = 0;
-	server.recv_done_cb = &read_packet_header;
+	server.recv_done_cb = &parse_packet_header;
 
 	return 0;
 }
@@ -236,7 +236,7 @@ int handle_read_from_tuntap()
 
   // make sure receive buffer has enough space.
   int bytes_to_read = MAX_QUEUE_SIZE - bytes_in_peer_buf - 2;
-  if(bytes_to_read <= 0) return 0;
+  if(bytes_to_read < LZF_BUF_SIZE) return 0;
 
   read_count = read(tuntap.fd, tuntap.recv_buf, bytes_to_read);
   if (read_count < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
@@ -244,70 +244,27 @@ int handle_read_from_tuntap()
     return -1;
   }
   // if (read_count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))，  donothing
-	// if read_count == 0, do nothing
-	if(read_count > 0) {
-		//compress and encrypt the data read.
-		u16 compressed_len = lzf_compress(tuntap.recv_buf, read_count, lzf_buf, LZF_BUF_SIZE);
-		// xor encrypt
-		crypt_xor(lzf_buf, compressed_len);
+  // if read_count == 0, do nothing
+  if(read_count > 0) {
+	//compress and encrypt the data read.
+	u16 compressed_len = lzf_compress(tuntap.recv_buf, read_count, lzf_buf, LZF_BUF_SIZE);
+	// xor encrypt
+	crypt_xor(lzf_buf, compressed_len);
 
-		memcpy(tuntap.recv_buf + 2, lzf_buf, compressed_len);
-		u16 len = htons(compressed_len);
-		memcpy(tuntap.recv_buf, &len, 2);
+	memcpy(tuntap.recv_buf + 2, lzf_buf, compressed_len);
+	u16 len = htons(compressed_len);
+	memcpy(tuntap.recv_buf, &len, 2);
 
-		// Copy to peer send buf.
-		/*
-		if(bytes_in_peer_buf + 2 + compressed_len > MAX_QUEUE_SIZE) {
-			log_message("Peer write buffer overflow");
-			return -1;
-		}
-		*/
-
-		memcpy(peer_write_buf + bytes_in_peer_buf, tuntap.recv_buf, 2 + compressed_len);
-		bytes_in_peer_buf += 2 + compressed_len;
-	} // count > 0
+	memcpy(peer_write_buf + bytes_in_peer_buf, tuntap.recv_buf, 2 + compressed_len);
+	bytes_in_peer_buf += (2 + compressed_len);
+  } 
   return 0;
-}
-
-void read_packet_header(void) {
-	//printf("read_packet_header\n");
-	u16 packet_len;
-	memcpy(&packet_len, server.recv_buf, 2);
-	packet_len = ntohs(packet_len);
-
-	// read packet body.
-	server.bytes_to_read = packet_len;
-	server.bytes_read = 0;
-	server.recv_done_cb = &read_packet_body; // when receive is done, enqueue the packet.
-}
-
-void read_packet_body(void) { //把从网络读取的数据处理后save到tuntap的write buffer中。
-	//printf("read_packet_body");
-	// xor decompress.
-	crypt_xor(server.recv_buf, server.bytes_read);
-
-	// decompress
-	int decompressed_len = lzf_decompress(server.recv_buf, server.bytes_read, lzf_buf, LZF_BUF_SIZE);
-	// write to tuntap.
-	if( (bytes_in_tap_buf + decompressed_len) > MAX_QUEUE_SIZE) {
-		log_message("TAP write buffer overflow.");
-		shutdown_properly(EXIT_FAILURE);
-	}
-	//Copy to tap_write_buf等待写入到tap。
-	memcpy(tap_write_buf + bytes_in_tap_buf, lzf_buf, decompressed_len);
-	bytes_in_tap_buf += decompressed_len;
-
-	// 准备读取下一个packet。
-	server.bytes_to_read = 2; // 下次读取2byte的header.
-	server.bytes_read = 0;
-	server.recv_done_cb = &read_packet_header;
 }
 
 /* Receive message from peer and handle it with message_handler(). */
 int handle_read_from_peer()
 {
 	if(server.bytes_to_read <= 0) {
-		printf("\"bytes_to_read\" invalid.\n");
 		return -1;
 	}
 
@@ -324,15 +281,47 @@ int handle_read_from_peer()
 		server.bytes_read += read_count;
 		if(server.bytes_read != server.bytes_to_read) return 0; // Waiting for next reading.
 
-		// read到足够的数据，调用peer_recv_done_cb
+		// else call peer_recv_done_cb
 		server.recv_done_cb();
 	}
 
 	return 0;
 }
 
+void parse_packet_header(void) {
+	//printf("parse_packet_header\n");
+	u16 packet_len;
+	memcpy(&packet_len, server.recv_buf, 2);
+	packet_len = ntohs(packet_len);
 
-//把buf中buf_size bytes的数据写入到fd, 并将buf_size更新为剩下的数据长度。
+	// read packet body.
+	server.bytes_to_read = packet_len;
+	server.bytes_read = 0;
+	server.recv_done_cb = &parse_packet_body; // when receive is done, enqueue the packet.
+}
+
+void parse_packet_body(void) {
+	//printf("parse_packet_body");
+	// xor decompress.
+	crypt_xor(server.recv_buf, server.bytes_read);
+
+	// decompress
+	int decompressed_len = lzf_decompress(server.recv_buf, server.bytes_read, lzf_buf, LZF_BUF_SIZE);
+	// write to tuntap.
+	if( (bytes_in_tap_buf + decompressed_len) > MAX_QUEUE_SIZE) {
+		log_message("TAP write buffer overflow.");
+		shutdown_properly(EXIT_FAILURE);
+	}
+	//Copy to tap_write_buf to write to tap device.
+	memcpy(tap_write_buf + bytes_in_tap_buf, lzf_buf, decompressed_len);
+	bytes_in_tap_buf += decompressed_len;
+
+	// read next packet.
+	server.bytes_to_read = 2; // 2 bytes header
+	server.bytes_read = 0;
+	server.recv_done_cb = &parse_packet_header;
+}
+
 int handle_write(int fd, char *buf, size_t *buf_size) {
 	ssize_t write_count = 0;
 	write_count = write(fd, buf, *buf_size);
@@ -345,9 +334,9 @@ int handle_write(int fd, char *buf, size_t *buf_size) {
 	if(write_count > 0) {
 		*buf_size -= write_count;
 
-		//一次没有写完。
-		if(*buf_size != 0) {
-			// 将剩下的数据move到buffer开始的地方。
+		// write not complete.
+		if(*buf_size > 0) {
+			// move remain data to the beginning of buffer.
 			size_t left = *buf_size,  moved = 0;
 			while(1) {
 				if(left > write_count) {
@@ -370,11 +359,6 @@ int handle_write(int fd, char *buf, size_t *buf_size) {
  * Ensure that server is thread-safe. */
 void shutdown_properly(int code)
 {
-	/*
-	if(shutdown(server.socket, SHUT_RDWR) != 0) {
-		perror("shutdown");
-	}
-	*/
 	if(close(server.socket) != 0) {
 		perror("close");
 	}
@@ -437,7 +421,18 @@ int main(int argc, char **argv)
         shutdown_properly(EXIT_FAILURE);
 
       default:
-        /* All fd_set's should be checked. */
+		// handle exceptions first.
+        if (FD_ISSET(tuntap.fd, &except_fds)) {
+          printf("except_fds for tuntap.\n");
+          shutdown_properly(EXIT_FAILURE);
+        }
+
+        if (FD_ISSET(server.socket, &except_fds)) {
+           printf("except_fds for server.\n");
+           shutdown_properly(EXIT_FAILURE);
+        }
+
+        // All fd_set's should be checked.
         if (FD_ISSET(tuntap.fd, &read_fds)) {
           if (handle_read_from_tuntap() != 0) {
 			log_message("Error read from tuntap.");
@@ -447,35 +442,27 @@ int main(int argc, char **argv)
 
 		if (FD_ISSET(tuntap.fd, &write_fds))
 		{
-			if(handle_write(tuntap.fd, tap_write_buf, &bytes_in_tap_buf) != 0) {
-				log_message("Error write to tuntap.");
-				shutdown_properly(EXIT_FAILURE);
-			}
+		  if(handle_write(tuntap.fd, tap_write_buf, &bytes_in_tap_buf) != 0) {
+			log_message("Error write to tuntap.");
+			shutdown_properly(EXIT_FAILURE);
+		  }
 		}
 
-        if (FD_ISSET(tuntap.fd, &except_fds)) {
-          printf("except_fds for tuntap.\n");
-          shutdown_properly(EXIT_FAILURE);
-        }
 
         if (FD_ISSET(server.socket, &read_fds)) {
           if (handle_read_from_peer() != 0) {
-						printf("Error read from peer.\n");
+			printf("Error read from peer.\n");
             shutdown_properly(EXIT_FAILURE);
-					}
+		  }
         }
 
 		if(FD_ISSET(server.socket, &write_fds)) {
-			if(handle_write(server.socket, peer_write_buf, &bytes_in_peer_buf) != 0) {
-				printf("Error write to peer.\n");
-				shutdown_properly(EXIT_FAILURE);
-			}
+		  if(handle_write(server.socket, peer_write_buf, &bytes_in_peer_buf) != 0) {
+			printf("Error write to peer.\n");
+			shutdown_properly(EXIT_FAILURE);
+		  }
 		}
 
-        if (FD_ISSET(server.socket, &except_fds)) {
-           printf("except_fds for server.\n");
-           shutdown_properly(EXIT_FAILURE);
-        }
     }// while 1
   }
   return 0;
@@ -489,6 +476,7 @@ void log_message(const char *message)
 void crypt_xor(char *buf, int buf_len)
 {
 	int m, n;
+	if(buf_len <= 0) return;
 	for(m = 0; m < buf_len; m++) {
 		n = m % XOR_KEYLEN;
 		buf[m] ^= shared_secret[n];
