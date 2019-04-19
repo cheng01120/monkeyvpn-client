@@ -221,7 +221,6 @@ int build_fd_sets()
 	if(bytes_in_peer_buf > 0)
 		FD_SET(server.socket, &write_fds);
 
-
   FD_ZERO(&except_fds);
   FD_SET(tuntap.fd, &except_fds);
   FD_SET(server.socket, &except_fds);
@@ -404,7 +403,19 @@ int main(int argc, char **argv)
   int maxfd = server.socket;
   if(tuntap.fd > maxfd) maxfd = tuntap.fd;
 
+	time_t last_active_time = time(NULL); // last read from or write to socket time.
+	char keepalive_header[2] = { 0xff, 0xff };
+
   while (1) {
+		// send keepalive message, two bytes, must be called before build_fd_sets()
+		time_t now = time(NULL);
+		if(now - last_active_time >= 30 && (MAX_QUEUE_SIZE - bytes_in_peer_buf) > 2) {
+			// append 2 bytes header which length is 65535
+			memcpy(peer_write_buf + bytes_in_peer_buf, keepalive_header, 2);
+			bytes_in_peer_buf += 2;
+			last_active_time = now;
+		}
+
     // Select() updates fd_set's, so we need to build fd_set's before each select()call.
     build_fd_sets();
 
@@ -421,7 +432,7 @@ int main(int argc, char **argv)
         shutdown_properly(EXIT_FAILURE);
 
       default:
-		// handle exceptions first.
+		    // handle exceptions first.
         if (FD_ISSET(tuntap.fd, &except_fds)) {
           printf("except_fds for tuntap.\n");
           shutdown_properly(EXIT_FAILURE);
@@ -435,33 +446,35 @@ int main(int argc, char **argv)
         // All fd_set's should be checked.
         if (FD_ISSET(tuntap.fd, &read_fds)) {
           if (handle_read_from_tuntap() != 0) {
-			log_message("Error read from tuntap.");
+						log_message("Error read from tuntap.");
             shutdown_properly(EXIT_FAILURE);
-		  }
+		  		}
         }
 
-		if (FD_ISSET(tuntap.fd, &write_fds))
-		{
-		  if(handle_write(tuntap.fd, tap_write_buf, &bytes_in_tap_buf) != 0) {
-			log_message("Error write to tuntap.");
-			shutdown_properly(EXIT_FAILURE);
-		  }
-		}
+				if (FD_ISSET(tuntap.fd, &write_fds))
+				{
+					if(handle_write(tuntap.fd, tap_write_buf, &bytes_in_tap_buf) != 0) {
+					  log_message("Error write to tuntap.");
+					  shutdown_properly(EXIT_FAILURE);
+					}
+				}
 
 
         if (FD_ISSET(server.socket, &read_fds)) {
+					last_active_time = time(NULL);
           if (handle_read_from_peer() != 0) {
-			printf("Error read from peer.\n");
+			      printf("Error read from peer.\n");
             shutdown_properly(EXIT_FAILURE);
-		  }
+		      }
         }
 
-		if(FD_ISSET(server.socket, &write_fds)) {
-		  if(handle_write(server.socket, peer_write_buf, &bytes_in_peer_buf) != 0) {
-			printf("Error write to peer.\n");
-			shutdown_properly(EXIT_FAILURE);
-		  }
-		}
+				if(FD_ISSET(server.socket, &write_fds)) {
+					last_active_time = time(NULL);
+					if(handle_write(server.socket, peer_write_buf, &bytes_in_peer_buf) != 0) {
+					printf("Error write to peer.\n");
+					shutdown_properly(EXIT_FAILURE);
+					}
+				}
 
     }// while 1
   }
