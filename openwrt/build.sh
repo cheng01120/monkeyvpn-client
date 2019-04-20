@@ -12,4 +12,6 @@ fi
 . ../env-openwrt.sh
 CC=mips-openwrt-linux-gcc
 
-$CC -I../3rdparty -I. -o monkeyvpn main.c tun_alloc.c
+$CC -I../3rdparty/LZF -I../3rdparty/AES -I../3rdparty/uECC -I.\
+	-o monkeyvpn \
+	main.c tun_alloc.c
