@@ -15,7 +15,7 @@ typedef uint8_t  u8;
 #define TRUE  1
 #define BOOL unsigned char
 
-#define LZF_BUF_SIZE 2048 // max ethernet frame size
+#define LZF_BUF_SIZE   2048 // max ethernet frame size is 1522.
 #define MAX_QUEUE_SIZE 81920
 
 typedef struct {
@@ -43,36 +43,25 @@ int shift_buffer(buffer_t *buf, size_t sz)
 	buf->length -= sz;
 }
 
-
-typedef void (*recv_done_cb_t)(void); // callback when peer get到足够的数据。
-
-typedef struct {
-	int fd;
-	char recv_buf[LZF_BUF_SIZE];
-	int bytes_to_read;
-	int bytes_read;
-
-	recv_done_cb_t recv_done_cb;
-} read_handler_t;
+typedef void (*recv_done_cb_t)(void); // callback when peer receives enough data.
 
 // local ---------------------------------------------------------------------
 typedef struct {
-	int fd;
+	int  fd;
 	char recv_buf[LZF_BUF_SIZE];
 } tuntap_t;
 
 // peer -----------------------------------------------------------------------
 
 typedef struct {
-    int    socket;
-    struct sockaddr_in addres;
+  int    socket;
+  struct sockaddr_in addres;
 
-    char recv_buf[LZF_BUF_SIZE];
+  char recv_buf[LZF_BUF_SIZE];
 
 	unsigned short bytes_to_read; // the next packet length to be read from peer.
 	unsigned short bytes_read; // how many bytes has been read for this packet.
 	recv_done_cb_t recv_done_cb;
-
 } peer_t;
 // common ---------------------------------------------------------------------
 

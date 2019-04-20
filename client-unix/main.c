@@ -34,7 +34,7 @@ char error_message[64];
 #define LOG_FILE "/tmp/mvpn-cli.log"
 void perror(const char *message);
 void log_message(const char *message);
-void crypt_xor(char *buf, int buf_len);
+void crypt_xor(char *buf, size_t buf_len);
 
 // global variables.
 peer_t   server;
@@ -43,22 +43,22 @@ fd_set read_fds, write_fds, except_fds;
 char server_pub_key[64], shared_secret[32], client_identity[128];
 char lzf_buf[LZF_BUF_SIZE];
 
-
-//当从网络读取数据后，先缓存在tap_write_buf中，然后等待tap_fd可写入。
+// save the data received from network to this buffer.
 char tap_write_buf[MAX_QUEUE_SIZE]; // buffer that holds data to be write to tap device.
 size_t bytes_in_tap_buf = 0;
 
-//当从tap中读取数据后，先缓存在peer_write_buf中，然后等待peer socket可写入。
+// save the data received from tap to this buffer.
 char peer_write_buf[MAX_QUEUE_SIZE];
 size_t bytes_in_peer_buf = 0;
 
 char if_name[IFNAMSIZ] = "tap0";
-const char *username = "openwrt";
-const char *password = "openwrt";
-unsigned char MAC[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+const char *username   = "openwrt";
+const char *password   = "openwrt";
+unsigned char MAC[6]   = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
 void parse_packet_header(void);
 void parse_packet_body(void);
+void async_read_server(size_t bytes_to_read, recv_done_cb_t recv_done_cb);
 
 void shutdown_properly(int code);
 
@@ -139,15 +139,15 @@ int connect_server()
 
 int auth() {
 	int i;
-    ssize_t bytes_read = read(server.socket, server_pub_key, 64);
-    if(bytes_read != 64) {
-  	  perror("Read server public key");
-	  return -1;
-    }
+  ssize_t bytes_read = read(server.socket, server_pub_key, 64);
+  if(bytes_read != 64) {
+	  perror("Read server public key");
+    return -1;
+  }
 
-    BYTE my_pub_key[64], my_priv_key[32]; // client DSA key pair.
-    uECC_make_key(my_pub_key, my_priv_key, uECC_CURVE);
-    uECC_shared_secret(
+  BYTE my_pub_key[64], my_priv_key[32]; // client DSA key pair.
+  uECC_make_key(my_pub_key, my_priv_key, uECC_CURVE);
+  uECC_shared_secret(
 			(BYTE *)server_pub_key, my_priv_key, (BYTE *)shared_secret, uECC_CURVE);
 	for(i = 0; i < 31; i++) {
 		// printf("%02hhX", a);
@@ -202,9 +202,7 @@ int auth() {
 
 	printf("Auth OK.\n");
 
-	server.bytes_to_read = 2; // header length: 2 bytes
-	server.bytes_read = 0;
-	server.recv_done_cb = &parse_packet_header;
+	async_read_server(2, &parse_packet_header);
 
 	return 0;
 }
@@ -293,10 +291,18 @@ void parse_packet_header(void) {
 	memcpy(&packet_len, server.recv_buf, 2);
 	packet_len = ntohs(packet_len);
 
-	// read packet body.
-	server.bytes_to_read = packet_len;
-	server.bytes_read = 0;
-	server.recv_done_cb = &parse_packet_body; // when receive is done, enqueue the packet.
+	if(packet_len == 0) {
+		// keep alive message.
+		printf("Got keep alive message\n");
+		async_read_server(2, &parse_packet_header);
+	}
+	else if(packet_len > LZF_BUF_SIZE) {
+		printf("Invalid packet length!\n");
+		shutdown_properly(EXIT_FAILURE);
+	}
+	else {
+		async_read_server(packet_len, &parse_packet_body);
+	}
 }
 
 void parse_packet_body(void) {
@@ -315,10 +321,7 @@ void parse_packet_body(void) {
 	memcpy(tap_write_buf + bytes_in_tap_buf, lzf_buf, decompressed_len);
 	bytes_in_tap_buf += decompressed_len;
 
-	// read next packet.
-	server.bytes_to_read = 2; // 2 bytes header
-	server.bytes_read = 0;
-	server.recv_done_cb = &parse_packet_header;
+	async_read_server(2, &parse_packet_header);
 }
 
 int handle_write(int fd, char *buf, size_t *buf_size) {
@@ -373,28 +376,28 @@ int main(int argc, char **argv)
 	memset(&tuntap, 0, sizeof(tuntap_t));
 	memset(&server, 0, sizeof(peer_t));
 
-    tuntap.fd = tun_alloc(if_name, IFF_TAP | IFF_NO_PI);
-    if(tuntap.fd < 0) {
-	  perror("Error open tap device");
+  tuntap.fd = tun_alloc(if_name, IFF_TAP | IFF_NO_PI);
+  if(tuntap.fd < 0) {
+		perror("Error open tap device");
 	  exit(EXIT_FAILURE);
-    }
+  }
 	find_mac(if_name, MAC);
-    //print_mac(MAC);
+  //print_mac(MAC);
 
-    /* Set nonblock for tap_fd. */
-    int flag = fcntl(tuntap.fd, F_GETFL, 0);
-    flag |= O_NONBLOCK;
-    fcntl(tuntap.fd, F_SETFL, flag);
+  /* Set nonblock for tap_fd. */
+  int flag = fcntl(tuntap.fd, F_GETFL, 0);
+  flag |= O_NONBLOCK;
+  fcntl(tuntap.fd, F_SETFL, flag);
 
 	set_ip_address(if_name, "192.168.2.3");
 
-  	if (setup_signals() != 0)
+  if (setup_signals() != 0)
    	 exit(EXIT_FAILURE);
 
-    if (connect_server() != 0) {
-		log_message("Unable to connect");
-        shutdown_properly(EXIT_FAILURE);
-  	}
+  if (connect_server() != 0) {
+	  log_message("Unable to connect");
+    shutdown_properly(EXIT_FAILURE);
+  }
 
 	if(auth() != 0) {
 		shutdown_properly(EXIT_FAILURE);
@@ -403,19 +406,7 @@ int main(int argc, char **argv)
   int maxfd = server.socket;
   if(tuntap.fd > maxfd) maxfd = tuntap.fd;
 
-	time_t last_active_time = time(NULL); // last read from or write to socket time.
-	char keepalive_header[2] = { 0xff, 0xff };
-
   while (1) {
-		// send keepalive message, two bytes, must be called before build_fd_sets()
-		time_t now = time(NULL);
-		if(now - last_active_time >= 30 && (MAX_QUEUE_SIZE - bytes_in_peer_buf) > 2) {
-			// append 2 bytes header which length is 65535
-			memcpy(peer_write_buf + bytes_in_peer_buf, keepalive_header, 2);
-			bytes_in_peer_buf += 2;
-			last_active_time = now;
-		}
-
     // Select() updates fd_set's, so we need to build fd_set's before each select()call.
     build_fd_sets();
 
@@ -459,9 +450,7 @@ int main(int argc, char **argv)
 					}
 				}
 
-
         if (FD_ISSET(server.socket, &read_fds)) {
-					last_active_time = time(NULL);
           if (handle_read_from_peer() != 0) {
 			      printf("Error read from peer.\n");
             shutdown_properly(EXIT_FAILURE);
@@ -469,7 +458,6 @@ int main(int argc, char **argv)
         }
 
 				if(FD_ISSET(server.socket, &write_fds)) {
-					last_active_time = time(NULL);
 					if(handle_write(server.socket, peer_write_buf, &bytes_in_peer_buf) != 0) {
 					printf("Error write to peer.\n");
 					shutdown_properly(EXIT_FAILURE);
@@ -486,12 +474,19 @@ void log_message(const char *message)
 	printf("%s\n", message);
 }
 
-void crypt_xor(char *buf, int buf_len)
+void crypt_xor(char *buf, size_t buf_len)
 {
 	int m, n;
-	if(buf_len <= 0) return;
+	if(buf_len == 0) return;
 	for(m = 0; m < buf_len; m++) {
 		n = m % XOR_KEYLEN;
 		buf[m] ^= shared_secret[n];
 	}
+}
+
+void async_read_server(size_t bytes_to_read, recv_done_cb_t recv_done_cb)
+{
+	server.bytes_to_read = bytes_to_read;
+	server.bytes_read    = 0;
+	server.recv_done_cb  = recv_done_cb;
 }
