@@ -1,9 +1,10 @@
 #include "tap_device.hpp"
+#define KEY "SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E972-E325-11CE-BFC1-08002BE10318}"
 
-void GetDeviceGuid(wxString& guid) {
-	guid.Empty();
-	wxString path("SYSTEM\\CurrentControlSet\\Control\\Class\\{4D36E972-E325-11CE-BFC1-08002BE10318}");
-	wxRegKey key(wxRegKey::HKLM, path);
+wxString GetDeviceGuid(void) {
+	wxString guid;
+
+	wxRegKey key(wxRegKey::HKLM, KEY);
 	key.Open(wxRegKey::AccessMode::Read);
 
 	size_t subkeys;
@@ -22,20 +23,22 @@ void GetDeviceGuid(wxString& guid) {
 
 		key.GetNextKey(key_name, l);
 	}
+
+	return guid;
 }
 
 HANDLE OpenDevice() {
-	wxString guid;
-	GetDeviceGuid(guid);
+	wxString guid = GetDeviceGuid();
 
-	wxString dev_name = wxString::Format("\\\\.\\Global\\%s.tap", guid);
-    HANDLE handle = CreateFile(dev_name,
-					  GENERIC_READ | GENERIC_WRITE,
-					  FILE_SHARE_READ | FILE_SHARE_WRITE,
-					  NULL, OPEN_EXISTING,
-					  FILE_ATTRIBUTE_SYSTEM |  FILE_FLAG_OVERLAPPED ,
-					  NULL
-				  );
+	wxString devName = wxString::Format("\\\\.\\Global\\%s.tap", guid);
+  HANDLE handle = CreateFile(devName,
+			  GENERIC_READ | GENERIC_WRITE,
+			  FILE_SHARE_READ | FILE_SHARE_WRITE,
+			  NULL, 
+				OPEN_EXISTING,
+			  FILE_ATTRIBUTE_SYSTEM |  FILE_FLAG_OVERLAPPED ,
+			  NULL
+		  );
 
 	return handle;
 }

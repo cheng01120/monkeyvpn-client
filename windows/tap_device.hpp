@@ -23,10 +23,12 @@
 #define TAP_IOCTL_CONFIG_DHCP_SET_OPT   _TAP_IOCTL(9)
 #define TAP_IOCTL_CONFIG_TUN            _TAP_IOCTL(10)
 
-void GetDeviceGuid(wxString&);
+wxString GetDeviceGuid(void);
 HANDLE OpenDevice();
 void GetMacAddress(HANDLE, unsigned char *);
 void EnableDevice(HANDLE h);
+// to set interface ipaddress see
+// https://docs.microsoft.com/en-us/windows/desktop/api/iphlpapi/nf-iphlpapi-addipaddress
 
 
 #endif
