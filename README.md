@@ -28,7 +28,7 @@ iptables -t nat -A POSTROUTING -p tcp  --dst 192.168.2.1 --dport 3128 -j MASQUER
 
 # Client setup
 
-To forward all traffic via VPN:
+To forward all traffic via VPN: <br/>
 **First add a host route to your vpn server** so when you delete the default gateway you can
 still contact your vpn server. Second delete the original default gateway and add the default
 gateway pointing to your vpn server.
