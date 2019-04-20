@@ -1,8 +1,0 @@
-Changes
-LZF.xs
-Makefile.PL
-MANIFEST
-ppport.h
-README
-t/LZF.t
-lib/LZF.pm

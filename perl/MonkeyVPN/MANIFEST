@@ -1,8 +1,0 @@
-Changes
-Makefile.PL
-MANIFEST
-MonkeyVPN.xs
-ppport.h
-README
-t/MonkeyVPN.t
-lib/MonkeyVPN.pm
